@@ -349,25 +349,17 @@ public final class RELProgramBuilder {
 
 				mapLoadedResult = SymbolLoader.TryLoadAssociatedMapFile(name, directory, program, settings.monitor(), relBaseAddress + relInfo.header.FullSize(), (int) relInfo.header.sectionAlignment,
 					relInfo.header.bssSectionId != 0 ? relInfo.header.sections[relInfo.header.bssSectionId].address : 0);
-
-				if (mapLoadedResult.loaded) {
-					symbolInfoList.add(mapLoadedResult.symbolMap);
-				}
 			}
 
 			String manualMapPath = LoaderOptionSupport.resolveModuleStringValue(manualMapPathsByModule, relInfo.name);
-			if (manualMapPath != null && (mapLoadedResult == null || !mapLoadedResult.loaded)) {
+			if (manualMapPath != null) {
 				mapLoadedResult = SymbolLoader.TryLoadMapFile(new File(manualMapPath), program, settings.monitor(),
 					relBaseAddress + relInfo.header.FullSize(), (int) relInfo.header.sectionAlignment,
 					relInfo.header.bssSectionId != 0 ? relInfo.header.sections[relInfo.header.bssSectionId].address : 0,
 					provider.getName(), true);
 			}
 
-			if (mapLoadedResult != null && mapLoadedResult.loaded) {
-				if (!symbolInfoList.contains(mapLoadedResult.symbolMap)) {
-					symbolInfoList.add(mapLoadedResult.symbolMap);
-				}
-			} else if (mapLoadedResult == null || !mapLoadedResult.loaded) {
+			if (mapLoadedResult == null || !mapLoadedResult.loaded) {
 				// Ask if the user wants to load a symbol map file.
 				if (!HeadlessSupport.isInteractive()) {
 					HeadlessSupport.logSkippedPrompt(RELProgramBuilder.class,
@@ -380,16 +372,15 @@ public final class RELProgramBuilder {
 					var selectedFile = fileChooser.getSelectedFile(true);
 
 					if (selectedFile != null) {
-						var loaderResult = SymbolLoader.TryLoadMapFile(selectedFile, program, settings.monitor(),
+						mapLoadedResult = SymbolLoader.TryLoadMapFile(selectedFile, program, settings.monitor(),
 							relBaseAddress + relInfo.header.FullSize(), (int) relInfo.header.sectionAlignment,
 							relInfo.header.bssSectionId != 0 ? relInfo.header.sections[relInfo.header.bssSectionId].address : 0,
 							provider.getName(), true);
-						if (loaderResult.loaded) {
-							symbolInfoList.add(loaderResult.symbolMap);
-						}
 					}
 				}
 			}
+
+			symbolInfoList.add(mapLoadedResult != null && mapLoadedResult.loaded ? mapLoadedResult.symbolMap : null);
 		}
 
 		// Apply relocations.

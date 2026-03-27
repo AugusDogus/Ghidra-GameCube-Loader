@@ -63,7 +63,12 @@ public final class DOLProgramBuilder {
 
 		// Ask if the user wants to load a symbol map file.
 		SymbolLoader.LoadMapResult mapLoadedResult = null;
-		if (autoloadMaps) {
+		if (manualMapPath != null && !manualMapPath.isBlank()) {
+			mapLoadedResult = SymbolLoader.TryLoadMapFile(new File(manualMapPath), program, settings.monitor(), dol.textSectionMemoryAddresses[0],
+				32, dol.bssMemoryAddress, provider.getName(), true);
+		}
+
+		if ((mapLoadedResult == null || !mapLoadedResult.loaded) && autoloadMaps) {
 			var name = provider.getName();
 			if (name.contains(".")) {
 				name = name.substring(0, name.lastIndexOf("."));
@@ -71,11 +76,6 @@ public final class DOLProgramBuilder {
 
 			mapLoadedResult = SymbolLoader.TryLoadAssociatedMapFile(name, provider.getFile().getParentFile(), program, settings.monitor(), dol.textSectionMemoryAddresses[0],
 				32, dol.bssMemoryAddress);
-		}
-
-		if (manualMapPath != null && !manualMapPath.isBlank() && (mapLoadedResult == null || !mapLoadedResult.loaded)) {
-			mapLoadedResult = SymbolLoader.TryLoadMapFile(new File(manualMapPath), program, settings.monitor(), dol.textSectionMemoryAddresses[0],
-				32, dol.bssMemoryAddress, provider.getName(), true);
 		}
 
 		if (mapLoadedResult == null || !mapLoadedResult.loaded) {
