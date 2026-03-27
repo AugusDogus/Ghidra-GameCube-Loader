@@ -2,6 +2,8 @@ package gamecubeloader.rel;
 
 import docking.widgets.OptionDialog;
 import docking.widgets.filechooser.GhidraFileChooser;
+import gamecubeloader.common.HeadlessSupport;
+import gamecubeloader.common.LoaderOptionSupport;
 import gamecubeloader.common.SymbolInfo;
 import gamecubeloader.common.SymbolLoader;
 import gamecubeloader.common.SystemMemorySections;
@@ -94,7 +96,8 @@ public final class RELProgramBuilder {
 	}
 
 	public static void load(Program program, Loader.ImporterSettings settings, RELHeader rel, boolean autoloadMaps, boolean saveRelocations,
-							boolean createDefaultMemSections, boolean specifyModuleMemAddrs)
+							boolean createDefaultMemSections, boolean specifyModuleMemAddrs, String manualMapPaths,
+							String moduleBaseAddressOverrides, String moduleBssAddressOverrides)
 		throws LoadException {
 		var addressSpace = program.getAddressFactory().getDefaultAddressSpace();
 
@@ -167,6 +170,9 @@ public final class RELProgramBuilder {
 		}
 
 		var currentOutputAddress = 0x80000000L;
+		Map<String, String> manualMapPathsByModule = LoaderOptionSupport.parseAssignmentList(manualMapPaths);
+		Map<String, Long> moduleBaseAddrsByModule = LoaderOptionSupport.parseAddressOverrides(moduleBaseAddressOverrides);
+		Map<String, Long> moduleBssAddrsByModule = LoaderOptionSupport.parseAddressOverrides(moduleBssAddressOverrides);
 
 		// If a DOL file exists, load it first.
 		if (dol != null) {
@@ -182,7 +188,7 @@ public final class RELProgramBuilder {
 				settings.log(),
 				settings.monitor()
 			);
-			DOLProgramBuilder.load(program, dolSettings, dol, autoloadMaps, false);
+			DOLProgramBuilder.load(program, dolSettings, dol, autoloadMaps, false, "");
 			currentOutputAddress = align(dol.memoryEndAddress, 0x20);
 		}
 
@@ -197,24 +203,33 @@ public final class RELProgramBuilder {
 
 			// If we're using manually specified memory addresses, ask the user where they want this file to be loaded.
 			if (specifyModuleMemAddrs) {
-				// TODO: Check against addresses already containing memory sections.
-				var setValidAddress = false;
-				while (!setValidAddress) {
-					var selectedAddress = OptionDialog.showInputSingleLineDialog(null, "Specify Memory Address", "Specify the base memory address for Module " +
-						relInfo.name, Long.toHexString(relBaseAddress));
+				Long configuredBaseAddress = LoaderOptionSupport.resolveModuleLongValue(moduleBaseAddrsByModule, relInfo.name);
+				if (configuredBaseAddress != null) {
+					relBaseAddress = currentOutputAddress = configuredBaseAddress;
+				} else if (!HeadlessSupport.isInteractive()) {
+					HeadlessSupport.logSkippedPrompt(RELProgramBuilder.class,
+						String.format("manual base address selection for module %s was skipped; using the computed address 0x%s.",
+							relInfo.name, Long.toHexString(relBaseAddress)));
+				} else {
+					// TODO: Check against addresses already containing memory sections.
+					var setValidAddress = false;
+					while (!setValidAddress) {
+						var selectedAddress = OptionDialog.showInputSingleLineDialog(null, "Specify Memory Address", "Specify the base memory address for Module " +
+							relInfo.name, Long.toHexString(relBaseAddress));
 
-					if (selectedAddress == null) {
-						break; // The user selected the cancel dialog.
-					}
-
-					try {
-						var specifiedAddr = Long.parseUnsignedLong(selectedAddress, 16);
-						if (specifiedAddr >= 0x80000000L && (specifiedAddr + relInfo.header.Size()) < 0x81800000L) {
-							relBaseAddress = currentOutputAddress = specifiedAddr;
-							setValidAddress = true;
+						if (selectedAddress == null) {
+							break; // The user selected the cancel dialog.
 						}
-					} catch (NumberFormatException e) {
-						continue;
+
+						try {
+							var specifiedAddr = Long.parseUnsignedLong(selectedAddress, 16);
+							if (specifiedAddr >= 0x80000000L && (specifiedAddr + relInfo.header.Size()) < 0x81800000L) {
+								relBaseAddress = currentOutputAddress = specifiedAddr;
+								setValidAddress = true;
+							}
+						} catch (NumberFormatException e) {
+							continue;
+						}
 					}
 				}
 			}
@@ -258,24 +273,33 @@ public final class RELProgramBuilder {
 			// Add bss section.
 			if (relInfo.header.bssSize != 0 && relInfo.header.bssSectionId != 0) {
 				if (specifyModuleMemAddrs) {
-					// TODO: Check against addresses already containing memory sections.
-					var setValidAddress = false;
-					while (!setValidAddress) {
-						var selectedAddress = OptionDialog.showInputSingleLineDialog(null, "Specify BSS Address", "Specify the BSS memory address for Module " +
-							relInfo.name, Long.toHexString(currentOutputAddress));
+					Long configuredBssAddress = LoaderOptionSupport.resolveModuleLongValue(moduleBssAddrsByModule, relInfo.name);
+					if (configuredBssAddress != null) {
+						currentOutputAddress = configuredBssAddress;
+					} else if (!HeadlessSupport.isInteractive()) {
+						HeadlessSupport.logSkippedPrompt(RELProgramBuilder.class,
+							String.format("manual BSS address selection for module %s was skipped; using the computed address 0x%s.",
+								relInfo.name, Long.toHexString(currentOutputAddress)));
+					} else {
+						// TODO: Check against addresses already containing memory sections.
+						var setValidAddress = false;
+						while (!setValidAddress) {
+							var selectedAddress = OptionDialog.showInputSingleLineDialog(null, "Specify BSS Address", "Specify the BSS memory address for Module " +
+								relInfo.name, Long.toHexString(currentOutputAddress));
 
-						if (selectedAddress == null) {
-							break;
-						}
-
-						try {
-							var specifiedAddr = Long.parseUnsignedLong(selectedAddress, 16);
-							if (specifiedAddr >= 0x80000000L && (specifiedAddr + relInfo.header.Size()) < 0x81800000L) {
-								currentOutputAddress = specifiedAddr;
-								setValidAddress = true;
+							if (selectedAddress == null) {
+								break;
 							}
-						} catch (NumberFormatException e) {
-							continue;
+
+							try {
+								var specifiedAddr = Long.parseUnsignedLong(selectedAddress, 16);
+								if (specifiedAddr >= 0x80000000L && (specifiedAddr + relInfo.header.Size()) < 0x81800000L) {
+									currentOutputAddress = specifiedAddr;
+									setValidAddress = true;
+								}
+							} catch (NumberFormatException e) {
+								continue;
+							}
 						}
 					}
 				} else if (relInfo.header.moduleVersion < 2 || relInfo.header.bssSectionAlignment == 0) {
@@ -329,8 +353,21 @@ public final class RELProgramBuilder {
 			}
 
 			if (mapLoadedResult != null && !mapLoadedResult.loaded) {
+				String manualMapPath = LoaderOptionSupport.resolveModuleStringValue(manualMapPathsByModule, relInfo.name);
+				if (manualMapPath != null) {
+					mapLoadedResult = SymbolLoader.TryLoadMapFile(new File(manualMapPath), program, settings.monitor(),
+						relBaseAddress + relInfo.header.FullSize(), 0,
+						relInfo.header.bssSectionId != 0 ? relInfo.header.sections[relInfo.header.bssSectionId].address : 0,
+						provider.getName(), true);
+				}
+
 				// Ask if the user wants to load a symbol map file.
-				if (OptionDialog.showOptionNoCancelDialog(null, "Load Symbols?", String.format("Would you like to load a symbol map for the relocatable module %s?", relInfo.name),
+				if (mapLoadedResult.loaded) {
+					symbolInfoList.add(mapLoadedResult.symbolMap);
+				} else if (!HeadlessSupport.isInteractive()) {
+					HeadlessSupport.logSkippedPrompt(RELProgramBuilder.class,
+						String.format("no associated REL symbol map was found for module %s, so the manual map selection dialog was skipped.", relInfo.name));
+				} else if (OptionDialog.showOptionNoCancelDialog(null, "Load Symbols?", String.format("Would you like to load a symbol map for the relocatable module %s?", relInfo.name),
 					"Yes", "No", null) == 1) {
 					var fileChooser = new GhidraFileChooser(null);
 					fileChooser.setCurrentDirectory(originalFile.getParentFile());
@@ -338,15 +375,10 @@ public final class RELProgramBuilder {
 					var selectedFile = fileChooser.getSelectedFile(true);
 
 					if (selectedFile != null) {
-						try {
-							var reader = new FileReader(selectedFile);
-							var loader = new SymbolLoader(program, settings.monitor(), reader, relBaseAddress + relInfo.header.FullSize(), 0,
-								relInfo.header.bssSectionId != 0 ? relInfo.header.sections[relInfo.header.bssSectionId].address : 0,
-								provider.getName(), true);
-							symbolInfoList.add(loader.ApplySymbols());
-						} catch (IOException e) {
-							throw new LoadException(String.format("Error while processing symbol map file %s", selectedFile.getAbsolutePath()), e);
-						}
+						var loaderResult = SymbolLoader.TryLoadMapFile(selectedFile, program, settings.monitor(), relBaseAddress + relInfo.header.FullSize(), 0,
+							relInfo.header.bssSectionId != 0 ? relInfo.header.sections[relInfo.header.bssSectionId].address : 0,
+							provider.getName(), true);
+						symbolInfoList.add(loaderResult.symbolMap);
 					}
 				}
 			}

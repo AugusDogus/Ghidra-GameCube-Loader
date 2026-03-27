@@ -17,6 +17,7 @@ package gamecubeloader;
 
 import gamecubeloader.apploader.ApploaderHeader;
 import gamecubeloader.apploader.ApploaderProgramBuilder;
+import gamecubeloader.common.LoaderOptionSupport;
 import gamecubeloader.common.Yaz0;
 import gamecubeloader.dol.DOLHeader;
 import gamecubeloader.dol.DOLProgramBuilder;
@@ -57,8 +58,11 @@ public class GameCubeLoader extends BinaryLoader {
 
 	private static final String ADD_RESERVED_AND_HARDWAREREGISTERS = "Create OS global memory section & hardware register memory sections";
 	private static final String AUTOLOAD_MAPS_OPTION_NAME = "Automatically load symbol map files with corresponding names";
+	private static final String MANUAL_MAP_PATH_OPTION_NAME = "Manual symbol map path(s)";
 	private static final String ADD_RELOCATIONS_OPTION_NAME = "Add relocation info to Relocation Table view (WARNING: Slow when using symbol maps)";
 	private static final String SPECIFY_BINARY_MEM_ADDRESSES = "Manually specify the memory address of each module loaded";
+	private static final String REL_BASE_ADDRESS_OVERRIDES_OPTION_NAME = "REL module base address overrides";
+	private static final String REL_BSS_ADDRESS_OVERRIDES_OPTION_NAME = "REL module BSS address overrides";
 
 	private BinaryType binaryType = BinaryType.UNKNOWN;
 	private DOLHeader dolHeader;
@@ -148,14 +152,18 @@ public class GameCubeLoader extends BinaryLoader {
 		boolean saveRelocations = OptionUtils.getBooleanOptionValue(ADD_RELOCATIONS_OPTION_NAME, settings.options(), false);
 		boolean createDefaultSections = OptionUtils.getBooleanOptionValue(ADD_RESERVED_AND_HARDWAREREGISTERS, settings.options(), true);
 		boolean specifyFileMemAddresses = OptionUtils.getBooleanOptionValue(SPECIFY_BINARY_MEM_ADDRESSES, settings.options(), false);
+		String manualMapPath = LoaderOptionSupport.getStringOptionValue(MANUAL_MAP_PATH_OPTION_NAME, settings.options(), "");
+		String relBaseAddressOverrides = LoaderOptionSupport.getStringOptionValue(REL_BASE_ADDRESS_OVERRIDES_OPTION_NAME, settings.options(), "");
+		String relBssAddressOverrides = LoaderOptionSupport.getStringOptionValue(REL_BSS_ADDRESS_OVERRIDES_OPTION_NAME, settings.options(), "");
 
 		switch (Objects.requireNonNull(this.binaryType)) {
-			case DOL -> DOLProgramBuilder.load(program, settings, dolHeader, autoLoadMaps, createDefaultSections);
+			case DOL -> DOLProgramBuilder.load(program, settings, dolHeader, autoLoadMaps, createDefaultSections, manualMapPath);
 			case REL ->
-				RELProgramBuilder.load(program, settings, relHeader, autoLoadMaps, saveRelocations, createDefaultSections, specifyFileMemAddresses);
+				RELProgramBuilder.load(program, settings, relHeader, autoLoadMaps, saveRelocations, createDefaultSections, specifyFileMemAddresses,
+					manualMapPath, relBaseAddressOverrides, relBssAddressOverrides);
 			case RSO -> RSOProgramBuilder.load(program, settings, rsoHeader);
 			case APPLOADER -> ApploaderProgramBuilder.load(program, settings, apploaderHeader, createDefaultSections);
-			case RAMDUMP -> RAMDumpProgramBuilder.load(program, settings, createDefaultSections);
+			case RAMDUMP -> RAMDumpProgramBuilder.load(program, settings, createDefaultSections, manualMapPath);
 			case UNKNOWN -> throw new LoadException("Failed to load, unsupported binary type");
 		}
 	}
@@ -167,18 +175,28 @@ public class GameCubeLoader extends BinaryLoader {
 			super.getDefaultOptions(provider, loadSpec, domainObject, isLoadIntoProgram, mirrorFsLayout);
 
 		list.add(new Option(AUTOLOAD_MAPS_OPTION_NAME, true, Boolean.class, Loader.COMMAND_LINE_ARG_PREFIX + "-autoloadMaps"));
+		list.add(new Option(MANUAL_MAP_PATH_OPTION_NAME, "", String.class, Loader.COMMAND_LINE_ARG_PREFIX + "-manualMapPaths"));
 		list.add(new Option(ADD_RELOCATIONS_OPTION_NAME, false, Boolean.class, Loader.COMMAND_LINE_ARG_PREFIX + "-saveRelocations"));
 		list.add(new Option(ADD_RESERVED_AND_HARDWAREREGISTERS, true, Boolean.class, Loader.COMMAND_LINE_ARG_PREFIX + "-addSystemMemorySections"));
 		list.add(new Option(SPECIFY_BINARY_MEM_ADDRESSES, false, Boolean.class, Loader.COMMAND_LINE_ARG_PREFIX + "-specifyFileMemAddrs"));
+		list.add(new Option(REL_BASE_ADDRESS_OVERRIDES_OPTION_NAME, "", String.class, Loader.COMMAND_LINE_ARG_PREFIX + "-relBaseAddrs"));
+		list.add(new Option(REL_BSS_ADDRESS_OVERRIDES_OPTION_NAME, "", String.class, Loader.COMMAND_LINE_ARG_PREFIX + "-relBssAddrs"));
 
 		return list;
 	}
 
 	@Override
 	public String validateOptions(ByteProvider provider, LoadSpec loadSpec, List<Option> options, Program program) {
-
-		// TODO: If this loader has custom options, validate them here.  Not all options require
-		// validation.
+		try {
+			String manualMapPaths = LoaderOptionSupport.getStringOptionValue(MANUAL_MAP_PATH_OPTION_NAME, options, "");
+			if (binaryType == BinaryType.REL && manualMapPaths.contains("=")) {
+				LoaderOptionSupport.parseAssignmentList(manualMapPaths);
+			}
+			LoaderOptionSupport.parseAddressOverrides(LoaderOptionSupport.getStringOptionValue(REL_BASE_ADDRESS_OVERRIDES_OPTION_NAME, options, ""));
+			LoaderOptionSupport.parseAddressOverrides(LoaderOptionSupport.getStringOptionValue(REL_BSS_ADDRESS_OVERRIDES_OPTION_NAME, options, ""));
+		} catch (IllegalArgumentException e) {
+			return e.getMessage();
+		}
 
 		return super.validateOptions(provider, loadSpec, options, program);
 	}
