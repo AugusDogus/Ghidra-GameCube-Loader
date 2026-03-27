@@ -15,10 +15,8 @@ import ghidra.program.model.listing.Program;
 import ghidra.util.Msg;
 import ghidra.util.filechooser.ExtensionFileFilter;
 
-import java.io.FileNotFoundException;
-import java.io.FileReader;
-import java.io.IOException;
 import java.io.File;
+import java.io.IOException;
 
 public final class DOLProgramBuilder {
 	public static void load(Program program, Loader.ImporterSettings settings, DOLHeader dol, boolean autoloadMaps, boolean createDefaultMemSections,
@@ -75,15 +73,13 @@ public final class DOLProgramBuilder {
 				32, dol.bssMemoryAddress);
 		}
 
-		if (mapLoadedResult != null && !mapLoadedResult.loaded) {
-			if (manualMapPath != null && !manualMapPath.isBlank()) {
-				mapLoadedResult = SymbolLoader.TryLoadMapFile(new File(manualMapPath), program, settings.monitor(), dol.textSectionMemoryAddresses[0],
-					32, dol.bssMemoryAddress, provider.getName(), true);
-			}
+		if (manualMapPath != null && !manualMapPath.isBlank() && (mapLoadedResult == null || !mapLoadedResult.loaded)) {
+			mapLoadedResult = SymbolLoader.TryLoadMapFile(new File(manualMapPath), program, settings.monitor(), dol.textSectionMemoryAddresses[0],
+				32, dol.bssMemoryAddress, provider.getName(), true);
+		}
 
-			if (mapLoadedResult.loaded) {
-				// manual map applied
-			} else if (!HeadlessSupport.isInteractive()) {
+		if (mapLoadedResult == null || !mapLoadedResult.loaded) {
+			if (!HeadlessSupport.isInteractive()) {
 				HeadlessSupport.logSkippedPrompt(DOLProgramBuilder.class,
 					"no associated DOL symbol map was found, so the manual map selection dialog was skipped.");
 			} else if (OptionDialog.showOptionNoCancelDialog(null, "Load Symbols?", "Would you like to load a symbol map for this DOL executable?", "Yes", "No", null) == 1) {
@@ -93,16 +89,10 @@ public final class DOLProgramBuilder {
 				var selectedFile = fileChooser.getSelectedFile(true);
 
 				if (selectedFile != null) {
-					FileReader reader = null;
-					try {
-						reader = new FileReader(selectedFile);
-					} catch (FileNotFoundException e) {
-						Msg.error(DOLProgramBuilder.class, String.format("Failed to open the symbol map file!\nReason: %s", e.getMessage()));
-					}
-
-					if (reader != null) {
-						SymbolLoader.TryLoadMapFile(selectedFile, program, settings.monitor(), dol.textSectionMemoryAddresses[0], 32, dol.bssMemoryAddress,
-							provider.getName(), true);
+					var loaderResult = SymbolLoader.TryLoadMapFile(selectedFile, program, settings.monitor(), dol.textSectionMemoryAddresses[0], 32,
+						dol.bssMemoryAddress, provider.getName(), true);
+					if (!loaderResult.loaded) {
+						Msg.error(DOLProgramBuilder.class, "Failed to open the symbol map file: " + selectedFile.getAbsolutePath());
 					}
 				}
 			}
