@@ -2,6 +2,8 @@ package gamecubeloader.dol;
 
 import docking.widgets.OptionDialog;
 import docking.widgets.filechooser.GhidraFileChooser;
+import gamecubeloader.common.HeadlessSupport;
+import gamecubeloader.common.LoaderOptionSupport;
 import gamecubeloader.common.SymbolLoader;
 import gamecubeloader.common.SystemMemorySections;
 import ghidra.app.util.MemoryBlockUtils;
@@ -16,9 +18,11 @@ import ghidra.util.filechooser.ExtensionFileFilter;
 import java.io.FileNotFoundException;
 import java.io.FileReader;
 import java.io.IOException;
+import java.io.File;
 
 public final class DOLProgramBuilder {
-	public static void load(Program program, Loader.ImporterSettings settings, DOLHeader dol, boolean autoloadMaps, boolean createDefaultMemSections) throws LoadException {
+	public static void load(Program program, Loader.ImporterSettings settings, DOLHeader dol, boolean autoloadMaps, boolean createDefaultMemSections,
+			String manualMapPath) throws LoadException {
 		var baseAddress = 0x80000000L;
 		var addressSpace = program.getAddressFactory().getDefaultAddressSpace();
 		var provider = settings.provider();
@@ -72,7 +76,17 @@ public final class DOLProgramBuilder {
 		}
 
 		if (mapLoadedResult != null && !mapLoadedResult.loaded) {
-			if (OptionDialog.showOptionNoCancelDialog(null, "Load Symbols?", "Would you like to load a symbol map for this DOL executable?", "Yes", "No", null) == 1) {
+			if (manualMapPath != null && !manualMapPath.isBlank()) {
+				mapLoadedResult = SymbolLoader.TryLoadMapFile(new File(manualMapPath), program, settings.monitor(), dol.textSectionMemoryAddresses[0],
+					32, dol.bssMemoryAddress, provider.getName(), true);
+			}
+
+			if (mapLoadedResult.loaded) {
+				// manual map applied
+			} else if (!HeadlessSupport.isInteractive()) {
+				HeadlessSupport.logSkippedPrompt(DOLProgramBuilder.class,
+					"no associated DOL symbol map was found, so the manual map selection dialog was skipped.");
+			} else if (OptionDialog.showOptionNoCancelDialog(null, "Load Symbols?", "Would you like to load a symbol map for this DOL executable?", "Yes", "No", null) == 1) {
 				var fileChooser = new GhidraFileChooser(null);
 				fileChooser.setCurrentDirectory(provider.getFile().getParentFile());
 				fileChooser.addFileFilter(new ExtensionFileFilter("map", "Symbol Map Files"));
@@ -87,9 +101,8 @@ public final class DOLProgramBuilder {
 					}
 
 					if (reader != null) {
-						SymbolLoader loader = new SymbolLoader(program, settings.monitor(), reader, dol.textSectionMemoryAddresses[0], 32, dol.bssMemoryAddress,
+						SymbolLoader.TryLoadMapFile(selectedFile, program, settings.monitor(), dol.textSectionMemoryAddresses[0], 32, dol.bssMemoryAddress,
 							provider.getName(), true);
-						loader.ApplySymbols();
 					}
 				}
 			}

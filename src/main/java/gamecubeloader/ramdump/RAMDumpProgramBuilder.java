@@ -2,6 +2,7 @@ package gamecubeloader.ramdump;
 
 import docking.widgets.OptionDialog;
 import docking.widgets.filechooser.GhidraFileChooser;
+import gamecubeloader.common.HeadlessSupport;
 import gamecubeloader.common.SymbolLoader;
 import gamecubeloader.common.SystemMemorySections;
 import ghidra.app.util.MemoryBlockUtils;
@@ -13,9 +14,10 @@ import ghidra.util.filechooser.ExtensionFileFilter;
 
 import java.io.FileNotFoundException;
 import java.io.FileReader;
+import java.io.File;
 
 public final class RAMDumpProgramBuilder {
-	public static void load(Program program, Loader.ImporterSettings settings, boolean createSystemMemSections)
+	public static void load(Program program, Loader.ImporterSettings settings, boolean createSystemMemSections, String manualMapPath)
 		throws LoadException {
 		var baseAddress = 0x80000000L;
 		var addressSpace = program.getAddressFactory().getDefaultAddressSpace();
@@ -32,7 +34,12 @@ public final class RAMDumpProgramBuilder {
 		}
 
 		/* Optionally load symbol map */
-		if (OptionDialog.showOptionNoCancelDialog(null, "Load Symbols?", "Would you like to load a symbol map for this RAM dump?", "Yes", "No", null) == 1) {
+		if (manualMapPath != null && !manualMapPath.isBlank()) {
+			SymbolLoader.TryLoadMapFile(new File(manualMapPath), program, settings.monitor(), baseAddress, 0, -1, "RAM Dump", false);
+		} else if (!HeadlessSupport.isInteractive()) {
+			HeadlessSupport.logSkippedPrompt(RAMDumpProgramBuilder.class,
+				"manual RAM dump symbol map selection was skipped.");
+		} else if (OptionDialog.showOptionNoCancelDialog(null, "Load Symbols?", "Would you like to load a symbol map for this RAM dump?", "Yes", "No", null) == 1) {
 			var fileChooser = new GhidraFileChooser(null);
 			fileChooser.setCurrentDirectory(provider.getFile().getParentFile());
 			fileChooser.addFileFilter(new ExtensionFileFilter("map", "Symbol Map Files"));
@@ -47,8 +54,7 @@ public final class RAMDumpProgramBuilder {
 				}
 
 				if (reader != null) {
-					SymbolLoader loader = new SymbolLoader(program, settings.monitor(), reader, baseAddress, 0, -1, "RAM Dump", false);
-					loader.ApplySymbols();
+					SymbolLoader.TryLoadMapFile(selectedFile, program, settings.monitor(), baseAddress, 0, -1, "RAM Dump", false);
 				}
 			}
 		}

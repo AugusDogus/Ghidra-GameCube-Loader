@@ -567,4 +567,22 @@ public class SymbolLoader {
 		
 		return new LoadMapResult(false, null);
 	}
+
+	public static LoadMapResult TryLoadMapFile(File file, Program program, TaskMonitor monitor,
+			long objectAddress, int alignment, long bssAddress, String binaryName, boolean renameMemoryBlocks) {
+		if (file == null) {
+			return new LoadMapResult(false, null);
+		}
+
+		FileReader fileReader;
+		try {
+			fileReader = new FileReader(file);
+		} catch (FileNotFoundException e) {
+			Msg.warn(SymbolLoader.class, "Failed to open symbol map file: " + file.getAbsolutePath());
+			return new LoadMapResult(false, null);
+		}
+
+		var loader = new SymbolLoader(program, monitor, fileReader, objectAddress, alignment, bssAddress, binaryName, renameMemoryBlocks);
+		return new LoadMapResult(true, loader.ApplySymbols());
+	}
 }
