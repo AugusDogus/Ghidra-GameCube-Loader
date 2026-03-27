@@ -208,6 +208,7 @@ public final class RELProgramBuilder {
 			if (shouldPromptForBaseAddress) {
 				Long configuredBaseAddress = LoaderOptionSupport.resolveModuleLongValue(moduleBaseAddrsByModule, relInfo.name);
 				if (configuredBaseAddress != null) {
+					validateConfiguredAddress(relInfo.name, "base", configuredBaseAddress, relInfo.header.Size());
 					relBaseAddress = currentOutputAddress = configuredBaseAddress;
 				} else if (!HeadlessSupport.isInteractive()) {
 					HeadlessSupport.logSkippedPrompt(RELProgramBuilder.class,
@@ -275,10 +276,13 @@ public final class RELProgramBuilder {
 
 			// Add bss section.
 			if (relInfo.header.bssSize != 0 && relInfo.header.bssSectionId != 0) {
+				boolean useExplicitBssAddress = false;
 				if (shouldPromptForBssAddress) {
 					Long configuredBssAddress = LoaderOptionSupport.resolveModuleLongValue(moduleBssAddrsByModule, relInfo.name);
 					if (configuredBssAddress != null) {
+						validateConfiguredAddress(relInfo.name, "BSS", configuredBssAddress, relInfo.header.Size());
 						currentOutputAddress = configuredBssAddress;
+						useExplicitBssAddress = true;
 					} else if (!HeadlessSupport.isInteractive()) {
 						HeadlessSupport.logSkippedPrompt(RELProgramBuilder.class,
 							String.format("manual BSS address selection for module %s was skipped; using the computed address 0x%s.",
@@ -299,16 +303,20 @@ public final class RELProgramBuilder {
 								if (specifiedAddr >= 0x80000000L && (specifiedAddr + relInfo.header.Size()) < 0x81800000L) {
 									currentOutputAddress = specifiedAddr;
 									setValidAddress = true;
+									useExplicitBssAddress = true;
 								}
 							} catch (NumberFormatException e) {
 								continue;
 							}
 						}
 					}
-				} else if (relInfo.header.moduleVersion < 2 || relInfo.header.bssSectionAlignment == 0) {
-					currentOutputAddress = align(currentOutputAddress, 0x20);
 				} else {
-					currentOutputAddress = align(currentOutputAddress, (int) relInfo.header.bssSectionAlignment);
+					currentOutputAddress = alignBssAddress(currentOutputAddress, relInfo);
+					useExplicitBssAddress = true;
+				}
+
+				if (!useExplicitBssAddress) {
+					currentOutputAddress = alignBssAddress(currentOutputAddress, relInfo);
 				}
 
 				MemoryBlockUtils.createUninitializedBlock(program, false, relInfo.name + "_.uninitialized0", addressSpace.getAddress(currentOutputAddress), relInfo.header.bssSize,
@@ -341,7 +349,15 @@ public final class RELProgramBuilder {
 			currentOutputAddress = align(currentOutputAddress, 0x20);
 
 			SymbolLoader.LoadMapResult mapLoadedResult = null;
-			if (autoloadMaps) {
+			String manualMapPath = LoaderOptionSupport.resolveModuleStringValue(manualMapPathsByModule, relInfo.name);
+			if (manualMapPath != null) {
+				mapLoadedResult = SymbolLoader.TryLoadMapFile(new File(manualMapPath), program, settings.monitor(),
+					relBaseAddress + relInfo.header.FullSize(), (int) relInfo.header.sectionAlignment,
+					relInfo.header.bssSectionId != 0 ? relInfo.header.sections[relInfo.header.bssSectionId].address : 0,
+					provider.getName(), true);
+			}
+
+			if ((mapLoadedResult == null || !mapLoadedResult.loaded) && autoloadMaps) {
 				var name = relInfo.name;
 				if (name.contains(".")) {
 					name = name.substring(0, name.lastIndexOf("."));
@@ -349,14 +365,6 @@ public final class RELProgramBuilder {
 
 				mapLoadedResult = SymbolLoader.TryLoadAssociatedMapFile(name, directory, program, settings.monitor(), relBaseAddress + relInfo.header.FullSize(), (int) relInfo.header.sectionAlignment,
 					relInfo.header.bssSectionId != 0 ? relInfo.header.sections[relInfo.header.bssSectionId].address : 0);
-			}
-
-			String manualMapPath = LoaderOptionSupport.resolveModuleStringValue(manualMapPathsByModule, relInfo.name);
-			if (manualMapPath != null) {
-				mapLoadedResult = SymbolLoader.TryLoadMapFile(new File(manualMapPath), program, settings.monitor(),
-					relBaseAddress + relInfo.header.FullSize(), (int) relInfo.header.sectionAlignment,
-					relInfo.header.bssSectionId != 0 ? relInfo.header.sections[relInfo.header.bssSectionId].address : 0,
-					provider.getName(), true);
 			}
 
 			if (mapLoadedResult == null || !mapLoadedResult.loaded) {
@@ -424,6 +432,21 @@ public final class RELProgramBuilder {
 		}
 
 		return address;
+	}
+
+	private static long alignBssAddress(long address, RelocatableModuleInfo relInfo) {
+		if (relInfo.header.moduleVersion < 2 || relInfo.header.bssSectionAlignment == 0) {
+			return align(address, 0x20);
+		}
+
+		return align(address, (int) relInfo.header.bssSectionAlignment);
+	}
+
+	private static void validateConfiguredAddress(String moduleName, String addressType, long address, long moduleSize) throws LoadException {
+		if (address < 0x80000000L || (address + moduleSize) >= 0x81800000L) {
+			throw new LoadException(String.format("Configured %s address 0x%s for module %s is outside the valid RAM range or does not fit the module.",
+				addressType, Long.toHexString(address), moduleName));
+		}
 	}
 
 	private static void relocate(Program program, RELHeader otherModule, RELHeader thisModule, BinaryReader thisReader, Map<Long, SymbolInfo> symbolInfo, boolean saveRelocations)
