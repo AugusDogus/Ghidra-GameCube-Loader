@@ -188,7 +188,8 @@ public final class RELProgramBuilder {
 				settings.log(),
 				settings.monitor()
 			);
-			DOLProgramBuilder.load(program, dolSettings, dol, autoloadMaps, false, "");
+			DOLProgramBuilder.load(program, dolSettings, dol, autoloadMaps, false,
+				LoaderOptionSupport.resolveModuleStringValue(manualMapPathsByModule, "main"));
 			currentOutputAddress = align(dol.memoryEndAddress, 0x20);
 		}
 
@@ -200,9 +201,11 @@ public final class RELProgramBuilder {
 		for (RelocatableModuleInfo relInfo : relArray) {
 			relInfo.header.bssSectionId = 0;
 			relBaseAddress = currentOutputAddress;
+			boolean shouldPromptForBaseAddress = specifyModuleMemAddrs || !moduleBaseAddrsByModule.isEmpty();
+			boolean shouldPromptForBssAddress = specifyModuleMemAddrs || !moduleBssAddrsByModule.isEmpty();
 
 			// If we're using manually specified memory addresses, ask the user where they want this file to be loaded.
-			if (specifyModuleMemAddrs) {
+			if (shouldPromptForBaseAddress) {
 				Long configuredBaseAddress = LoaderOptionSupport.resolveModuleLongValue(moduleBaseAddrsByModule, relInfo.name);
 				if (configuredBaseAddress != null) {
 					relBaseAddress = currentOutputAddress = configuredBaseAddress;
@@ -272,7 +275,7 @@ public final class RELProgramBuilder {
 
 			// Add bss section.
 			if (relInfo.header.bssSize != 0 && relInfo.header.bssSectionId != 0) {
-				if (specifyModuleMemAddrs) {
+				if (shouldPromptForBssAddress) {
 					Long configuredBssAddress = LoaderOptionSupport.resolveModuleLongValue(moduleBssAddrsByModule, relInfo.name);
 					if (configuredBssAddress != null) {
 						currentOutputAddress = configuredBssAddress;
@@ -352,19 +355,21 @@ public final class RELProgramBuilder {
 				}
 			}
 
-			if (mapLoadedResult != null && !mapLoadedResult.loaded) {
-				String manualMapPath = LoaderOptionSupport.resolveModuleStringValue(manualMapPathsByModule, relInfo.name);
-				if (manualMapPath != null) {
-					mapLoadedResult = SymbolLoader.TryLoadMapFile(new File(manualMapPath), program, settings.monitor(),
-						relBaseAddress + relInfo.header.FullSize(), 0,
-						relInfo.header.bssSectionId != 0 ? relInfo.header.sections[relInfo.header.bssSectionId].address : 0,
-						provider.getName(), true);
-				}
+			String manualMapPath = LoaderOptionSupport.resolveModuleStringValue(manualMapPathsByModule, relInfo.name);
+			if (manualMapPath != null && (mapLoadedResult == null || !mapLoadedResult.loaded)) {
+				mapLoadedResult = SymbolLoader.TryLoadMapFile(new File(manualMapPath), program, settings.monitor(),
+					relBaseAddress + relInfo.header.FullSize(), (int) relInfo.header.sectionAlignment,
+					relInfo.header.bssSectionId != 0 ? relInfo.header.sections[relInfo.header.bssSectionId].address : 0,
+					provider.getName(), true);
+			}
 
-				// Ask if the user wants to load a symbol map file.
-				if (mapLoadedResult.loaded) {
+			if (mapLoadedResult != null && mapLoadedResult.loaded) {
+				if (!symbolInfoList.contains(mapLoadedResult.symbolMap)) {
 					symbolInfoList.add(mapLoadedResult.symbolMap);
-				} else if (!HeadlessSupport.isInteractive()) {
+				}
+			} else if (mapLoadedResult == null || !mapLoadedResult.loaded) {
+				// Ask if the user wants to load a symbol map file.
+				if (!HeadlessSupport.isInteractive()) {
 					HeadlessSupport.logSkippedPrompt(RELProgramBuilder.class,
 						String.format("no associated REL symbol map was found for module %s, so the manual map selection dialog was skipped.", relInfo.name));
 				} else if (OptionDialog.showOptionNoCancelDialog(null, "Load Symbols?", String.format("Would you like to load a symbol map for the relocatable module %s?", relInfo.name),
@@ -375,10 +380,13 @@ public final class RELProgramBuilder {
 					var selectedFile = fileChooser.getSelectedFile(true);
 
 					if (selectedFile != null) {
-						var loaderResult = SymbolLoader.TryLoadMapFile(selectedFile, program, settings.monitor(), relBaseAddress + relInfo.header.FullSize(), 0,
+						var loaderResult = SymbolLoader.TryLoadMapFile(selectedFile, program, settings.monitor(),
+							relBaseAddress + relInfo.header.FullSize(), (int) relInfo.header.sectionAlignment,
 							relInfo.header.bssSectionId != 0 ? relInfo.header.sections[relInfo.header.bssSectionId].address : 0,
 							provider.getName(), true);
-						symbolInfoList.add(loaderResult.symbolMap);
+						if (loaderResult.loaded) {
+							symbolInfoList.add(loaderResult.symbolMap);
+						}
 					}
 				}
 			}

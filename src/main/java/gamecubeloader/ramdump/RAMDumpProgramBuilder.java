@@ -12,8 +12,6 @@ import ghidra.program.model.listing.Program;
 import ghidra.util.Msg;
 import ghidra.util.filechooser.ExtensionFileFilter;
 
-import java.io.FileNotFoundException;
-import java.io.FileReader;
 import java.io.File;
 
 public final class RAMDumpProgramBuilder {
@@ -46,15 +44,9 @@ public final class RAMDumpProgramBuilder {
 			var selectedFile = fileChooser.getSelectedFile(true);
 
 			if (selectedFile != null) {
-				FileReader reader = null;
-				try {
-					reader = new FileReader(selectedFile);
-				} catch (FileNotFoundException e) {
-					Msg.error(RAMDumpProgramBuilder.class, String.format("Failed to open the symbol map file!\nReason: %s", e.getMessage()));
-				}
-
-				if (reader != null) {
-					SymbolLoader.TryLoadMapFile(selectedFile, program, settings.monitor(), baseAddress, 0, -1, "RAM Dump", false);
+				var loaderResult = SymbolLoader.TryLoadMapFile(selectedFile, program, settings.monitor(), baseAddress, 0, -1, "RAM Dump", false);
+				if (!loaderResult.loaded) {
+					Msg.error(RAMDumpProgramBuilder.class, "Failed to open the symbol map file: " + selectedFile.getAbsolutePath());
 				}
 			}
 		}

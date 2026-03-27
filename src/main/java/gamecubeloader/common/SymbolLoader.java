@@ -4,6 +4,7 @@ import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.FileReader;
+import java.io.IOException;
 import java.util.*;
 
 import ghidra.app.util.demangler.DemangledObject;
@@ -574,15 +575,15 @@ public class SymbolLoader {
 			return new LoadMapResult(false, null);
 		}
 
-		FileReader fileReader;
-		try {
-			fileReader = new FileReader(file);
+		try (FileReader fileReader = new FileReader(file)) {
+			var loader = new SymbolLoader(program, monitor, fileReader, objectAddress, alignment, bssAddress, binaryName, renameMemoryBlocks);
+			return new LoadMapResult(true, loader.ApplySymbols());
 		} catch (FileNotFoundException e) {
 			Msg.warn(SymbolLoader.class, "Failed to open symbol map file: " + file.getAbsolutePath());
 			return new LoadMapResult(false, null);
+		} catch (IOException e) {
+			Msg.warn(SymbolLoader.class, "Failed to read symbol map file: " + file.getAbsolutePath());
+			return new LoadMapResult(false, null);
 		}
-
-		var loader = new SymbolLoader(program, monitor, fileReader, objectAddress, alignment, bssAddress, binaryName, renameMemoryBlocks);
-		return new LoadMapResult(true, loader.ApplySymbols());
 	}
 }

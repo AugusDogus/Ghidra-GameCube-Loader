@@ -189,7 +189,7 @@ public class GameCubeLoader extends BinaryLoader {
 	public String validateOptions(ByteProvider provider, LoadSpec loadSpec, List<Option> options, Program program) {
 		try {
 			String manualMapPaths = LoaderOptionSupport.getStringOptionValue(MANUAL_MAP_PATH_OPTION_NAME, options, "");
-			if (binaryType == BinaryType.REL && manualMapPaths.contains("=")) {
+			if (binaryType == BinaryType.REL && !manualMapPaths.isBlank()) {
 				LoaderOptionSupport.parseAssignmentList(manualMapPaths);
 			}
 			LoaderOptionSupport.parseAddressOverrides(LoaderOptionSupport.getStringOptionValue(REL_BASE_ADDRESS_OVERRIDES_OPTION_NAME, options, ""));

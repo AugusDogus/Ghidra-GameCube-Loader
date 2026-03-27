@@ -84,12 +84,7 @@ public final class LoaderOptionSupport {
 			return value;
 		}
 
-		int extension = normalizedName.lastIndexOf('.');
-		if (extension > 0) {
-			return optionsByModule.get(normalizedName.substring(0, extension));
-		}
-
-		return null;
+		return resolveMatchingEntry(optionsByModule, normalizedName);
 	}
 
 	public static Long resolveModuleLongValue(Map<String, Long> optionsByModule, String moduleName) {
@@ -103,12 +98,33 @@ public final class LoaderOptionSupport {
 			return value;
 		}
 
-		int extension = normalizedName.lastIndexOf('.');
-		if (extension > 0) {
-			return optionsByModule.get(normalizedName.substring(0, extension));
+		return resolveMatchingEntry(optionsByModule, normalizedName);
+	}
+
+	private static <T> T resolveMatchingEntry(Map<String, T> optionsByModule, String normalizedName) {
+		String normalizedBaseName = stripExtension(normalizedName);
+		if (!normalizedBaseName.equals(normalizedName)) {
+			T value = optionsByModule.get(normalizedBaseName);
+			if (value != null) {
+				return value;
+			}
+		}
+
+		for (Map.Entry<String, T> entry : optionsByModule.entrySet()) {
+			String normalizedKey = normalizeKey(entry.getKey());
+			String normalizedKeyBase = stripExtension(normalizedKey);
+			if (normalizedKey.equals(normalizedName) || normalizedKey.equals(normalizedBaseName)
+					|| normalizedKeyBase.equals(normalizedName) || normalizedKeyBase.equals(normalizedBaseName)) {
+				return entry.getValue();
+			}
 		}
 
 		return null;
+	}
+
+	private static String stripExtension(String key) {
+		int extension = key.lastIndexOf('.');
+		return extension > 0 ? key.substring(0, extension) : key;
 	}
 
 	private static String normalizeKey(String key) {
