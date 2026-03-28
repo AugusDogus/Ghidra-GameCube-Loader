@@ -201,16 +201,16 @@ public final class RELProgramBuilder {
 		for (RelocatableModuleInfo relInfo : relArray) {
 			relInfo.header.bssSectionId = 0;
 			relBaseAddress = currentOutputAddress;
-			boolean shouldPromptForBaseAddress = specifyModuleMemAddrs || !moduleBaseAddrsByModule.isEmpty();
-			boolean shouldPromptForBssAddress = specifyModuleMemAddrs || !moduleBssAddrsByModule.isEmpty();
+			boolean shouldPromptForBaseAddress = specifyModuleMemAddrs;
+			boolean shouldPromptForBssAddress = specifyModuleMemAddrs;
 
 			// If we're using manually specified memory addresses, ask the user where they want this file to be loaded.
-			if (shouldPromptForBaseAddress) {
-				Long configuredBaseAddress = LoaderOptionSupport.resolveModuleLongValue(moduleBaseAddrsByModule, relInfo.name);
-				if (configuredBaseAddress != null) {
-					validateConfiguredAddress(relInfo.name, "base", configuredBaseAddress, relInfo.header.Size());
-					relBaseAddress = currentOutputAddress = configuredBaseAddress;
-				} else if (!HeadlessSupport.isInteractive()) {
+			Long configuredBaseAddress = LoaderOptionSupport.resolveModuleLongValue(moduleBaseAddrsByModule, relInfo.name);
+			if (configuredBaseAddress != null) {
+				validateConfiguredAddress(relInfo.name, "base", configuredBaseAddress, relInfo.header.Size());
+				relBaseAddress = currentOutputAddress = configuredBaseAddress;
+			} else if (shouldPromptForBaseAddress) {
+				if (!HeadlessSupport.isInteractive()) {
 					HeadlessSupport.logSkippedPrompt(RELProgramBuilder.class,
 						String.format("manual base address selection for module %s was skipped; using the computed address 0x%s.",
 							relInfo.name, Long.toHexString(relBaseAddress)));
@@ -227,7 +227,7 @@ public final class RELProgramBuilder {
 
 						try {
 							var specifiedAddr = Long.parseUnsignedLong(selectedAddress, 16);
-							if (specifiedAddr >= 0x80000000L && (specifiedAddr + relInfo.header.Size()) < 0x81800000L) {
+							if (specifiedAddr >= 0x80000000L && specifiedAddr <= 0x81800000L - relInfo.header.Size()) {
 								relBaseAddress = currentOutputAddress = specifiedAddr;
 								setValidAddress = true;
 							}
@@ -277,13 +277,14 @@ public final class RELProgramBuilder {
 			// Add bss section.
 			if (relInfo.header.bssSize != 0 && relInfo.header.bssSectionId != 0) {
 				boolean useExplicitBssAddress = false;
-				if (shouldPromptForBssAddress) {
-					Long configuredBssAddress = LoaderOptionSupport.resolveModuleLongValue(moduleBssAddrsByModule, relInfo.name);
-					if (configuredBssAddress != null) {
-						validateConfiguredAddress(relInfo.name, "BSS", configuredBssAddress, relInfo.header.Size());
-						currentOutputAddress = configuredBssAddress;
-						useExplicitBssAddress = true;
-					} else if (!HeadlessSupport.isInteractive()) {
+				Long configuredBssAddress = LoaderOptionSupport.resolveModuleLongValue(moduleBssAddrsByModule, relInfo.name);
+				if (configuredBssAddress != null) {
+					validateConfiguredAddress(relInfo.name, "BSS", configuredBssAddress, relInfo.header.Size());
+					validateConfiguredBssAlignment(relInfo, configuredBssAddress);
+					currentOutputAddress = configuredBssAddress;
+					useExplicitBssAddress = true;
+				} else if (shouldPromptForBssAddress) {
+					if (!HeadlessSupport.isInteractive()) {
 						HeadlessSupport.logSkippedPrompt(RELProgramBuilder.class,
 							String.format("manual BSS address selection for module %s was skipped; using the computed address 0x%s.",
 								relInfo.name, Long.toHexString(currentOutputAddress)));
@@ -300,7 +301,9 @@ public final class RELProgramBuilder {
 
 							try {
 								var specifiedAddr = Long.parseUnsignedLong(selectedAddress, 16);
-								if (specifiedAddr >= 0x80000000L && (specifiedAddr + relInfo.header.Size()) < 0x81800000L) {
+								if (specifiedAddr >= 0x80000000L
+										&& specifiedAddr <= 0x81800000L - relInfo.header.Size()
+										&& alignBssAddress(specifiedAddr, relInfo) == specifiedAddr) {
 									currentOutputAddress = specifiedAddr;
 									setValidAddress = true;
 									useExplicitBssAddress = true;
@@ -443,9 +446,16 @@ public final class RELProgramBuilder {
 	}
 
 	private static void validateConfiguredAddress(String moduleName, String addressType, long address, long moduleSize) throws LoadException {
-		if (address < 0x80000000L || (address + moduleSize) >= 0x81800000L) {
+		if (address < 0x80000000L || address > 0x81800000L - moduleSize) {
 			throw new LoadException(String.format("Configured %s address 0x%s for module %s is outside the valid RAM range or does not fit the module.",
 				addressType, Long.toHexString(address), moduleName));
+		}
+	}
+
+	private static void validateConfiguredBssAlignment(RelocatableModuleInfo relInfo, long address) throws LoadException {
+		if (alignBssAddress(address, relInfo) != address) {
+			throw new LoadException(String.format("Configured BSS address 0x%s for module %s does not satisfy the required alignment.",
+				Long.toHexString(address), relInfo.name));
 		}
 	}
 
