@@ -170,9 +170,16 @@ public final class RELProgramBuilder {
 		}
 
 		var currentOutputAddress = 0x80000000L;
-		Map<String, String> manualMapPathsByModule = LoaderOptionSupport.parseAssignmentList(manualMapPaths);
-		Map<String, Long> moduleBaseAddrsByModule = LoaderOptionSupport.parseAddressOverrides(moduleBaseAddressOverrides);
-		Map<String, Long> moduleBssAddrsByModule = LoaderOptionSupport.parseAddressOverrides(moduleBssAddressOverrides);
+		Map<String, String> manualMapPathsByModule;
+		Map<String, Long> moduleBaseAddrsByModule;
+		Map<String, Long> moduleBssAddrsByModule;
+		try {
+			manualMapPathsByModule = LoaderOptionSupport.parseAssignmentList(manualMapPaths);
+			moduleBaseAddrsByModule = LoaderOptionSupport.parseAddressOverrides(moduleBaseAddressOverrides);
+			moduleBssAddrsByModule = LoaderOptionSupport.parseAddressOverrides(moduleBssAddressOverrides);
+		} catch (IllegalArgumentException e) {
+			throw new LoadException("Invalid loader option: " + e.getMessage(), e);
+		}
 
 		// If a DOL file exists, load it first.
 		if (dol != null) {
@@ -279,7 +286,7 @@ public final class RELProgramBuilder {
 				boolean useExplicitBssAddress = false;
 				Long configuredBssAddress = LoaderOptionSupport.resolveModuleLongValue(moduleBssAddrsByModule, relInfo.name);
 				if (configuredBssAddress != null) {
-					validateConfiguredAddress(relInfo.name, "BSS", configuredBssAddress, relInfo.header.Size());
+					validateConfiguredAddress(relInfo.name, "BSS", configuredBssAddress, relInfo.header.bssSize);
 					validateConfiguredBssAlignment(relInfo, configuredBssAddress);
 					currentOutputAddress = configuredBssAddress;
 					useExplicitBssAddress = true;
@@ -302,7 +309,7 @@ public final class RELProgramBuilder {
 							try {
 								var specifiedAddr = Long.parseUnsignedLong(selectedAddress, 16);
 								if (specifiedAddr >= 0x80000000L
-										&& specifiedAddr <= 0x81800000L - relInfo.header.Size()
+										&& specifiedAddr <= 0x81800000L - relInfo.header.bssSize
 										&& alignBssAddress(specifiedAddr, relInfo) == specifiedAddr) {
 									currentOutputAddress = specifiedAddr;
 									setValidAddress = true;
@@ -358,9 +365,12 @@ public final class RELProgramBuilder {
 					relBaseAddress + relInfo.header.FullSize(), (int) relInfo.header.sectionAlignment,
 					relInfo.header.bssSectionId != 0 ? relInfo.header.sections[relInfo.header.bssSectionId].address : 0,
 					provider.getName(), true);
+				if (!mapLoadedResult.loaded) {
+					throw new LoadException(String.format("Failed to load configured symbol map '%s' for module %s.", manualMapPath, relInfo.name));
+				}
 			}
 
-			if ((mapLoadedResult == null || !mapLoadedResult.loaded) && autoloadMaps) {
+			if (manualMapPath == null && autoloadMaps) {
 				var name = relInfo.name;
 				if (name.contains(".")) {
 					name = name.substring(0, name.lastIndexOf("."));
